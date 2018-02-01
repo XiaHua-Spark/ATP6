@@ -493,7 +493,7 @@ int SetShotParameter(Camera& camera, int brightness_val, int gain_val, int shutt
 		cv::minMaxLoc(image, &min, &max);
 		
 		shutter_val ++;
-		cout << "shutter value: " << shutter_val << endl;
+		cout << "using shutter value: " << shutter_val << endl;
 	}
 
 	// change shutter using camera internal unit
