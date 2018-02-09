@@ -378,10 +378,10 @@ cv::Point2f GetSpotCenter(Camera& camera)
 	//cv::Mat blurred;
 	//cv::GaussianBlur(image, blurred, cv::Size(3, 3), 0);
 
-	// threshold it
+	// adaptive threshold with otsu method 
 	cv::Mat thresh;
-	cv::threshold(image, thresh, 20, 255, cv::THRESH_BINARY);
-
+	cv::threshold(image, thresh, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
+	
 	// find contours in the thresholded image
 	cv::Mat dst = cv::Mat::zeros(image.rows, image.cols, CV_8UC3);
 
@@ -394,7 +394,7 @@ cv::Point2f GetSpotCenter(Camera& camera)
 	int largest_area = 0;
 	int largest_contour_index = 0;
 
-	for (size_t i = 0; i < contours.size(); i++)  // iterate through each contour.
+	for (size_t i = 0; i < contours.size(); i++)  // iterate through each contour
 	{
 		double area = contourArea(contours[i]);  //  Find the area of contour
 
@@ -414,6 +414,12 @@ cv::Point2f GetSpotCenter(Camera& camera)
 	// Get the mass centers:
 	cv::Point2f mc;
 	mc = cv::Point2f(mu.m10 / mu.m00, mu.m01 / mu.m00);
+
+	// draw contour
+	//cv::drawContours(image, contours, largest_contour_index, (128, 128, 0), 1);
+	//cv::namedWindow("contour");
+	//cv::imshow("contour", image);
+	//cv::waitKey();
 
 	return mc;
 }
