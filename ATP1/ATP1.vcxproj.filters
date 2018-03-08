@@ -19,22 +19,4 @@
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
-  <ItemGroup>
-    <None Include="Thorlabs.MotionControl.KCube.Piezo.dll">
-      <Filter>Resource Files</Filter>
-    </None>
-    <None Include="Thorlabs.MotionControl.DeviceManager.dll">
-      <Filter>Resource Files</Filter>
-    </None>
-  </ItemGroup>
-  <ItemGroup>
-    <Library Include="Thorlabs.MotionControl.KCube.Piezo.lib">
-      <Filter>Resource Files</Filter>
-    </Library>
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="Thorlabs.MotionControl.KCube.Piezo.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-  </ItemGroup>
 </Project>

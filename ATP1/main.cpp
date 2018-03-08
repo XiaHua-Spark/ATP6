@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <iostream>
 #include <fstream>   
-
+#include <Windows.h>
 #include <FlyCapture2.h>
 
 #include <opencv2/core/core.hpp>  
@@ -11,17 +11,20 @@
 #include <string.h>
 #include <tchar.h>
 #include <math.h>
-#include "Thorlabs.MotionControl.KCube.Piezo.h"
+
+#include "NIDAQmx.h"
+
 #pragma once
+
 
 using namespace std;
 using namespace FlyCapture2;
 
 cv::Point2f GetSpotCenter(Camera& camera);
 
-int setvoltage(char* piezo_serialno, double voltage, double max_voltage);
+int setvoltage(TaskHandle taskhandle, float64 voltage);
 
-vector<cv::Point2d> calibrate_controller(char* piezo_serialno, Camera& camera, cv::Point2f initMassCenter, int calib_start, int calib_stop, int calib_step, double maximumoutput);
+vector<cv::Point2d> calibrate_controller(TaskHandle taskhandle, Camera& camera, cv::Point2f initMassCenter, int calib_start, int calib_stop, int calib_step, double factor);
 
 int SetShotParameter(Camera& camera, int brightness_val, int gain_val, int shutter_val);
 
@@ -44,6 +47,20 @@ int main()
 	Camera camera;
 	CameraInfo camInfo;
 
+	// initialize the adc
+	TaskHandle	taskHandle_ao0 = 0;
+	TaskHandle	taskHandle_ao1 = 0;
+
+	DAQmxCreateTask("", &taskHandle_ao0);
+	DAQmxCreateTask("", &taskHandle_ao1);
+
+	DAQmxCreateAOVoltageChan(taskHandle_ao0, "Dev1/ao0", "", 0.0, 10.0, DAQmx_Val_Volts, "");
+	DAQmxCreateAOVoltageChan(taskHandle_ao1, "Dev1/ao1", "", 0.0, 10.0, DAQmx_Val_Volts, "");
+
+	DAQmxStartTask(taskHandle_ao0);
+	DAQmxStartTask(taskHandle_ao1);
+
+	
 	// Connect the camera
 	error = camera.Connect(0);
 	error = camera.StartCapture();
@@ -69,66 +86,9 @@ int main()
 	//cv::namedWindow("win");
 	//cv::imshow("win", image);
 	//cv::waitKey();
-
-	// initialize the kpz101
-	// Build list of the connected device
-	short piezo_connect_check = TLI_BuildDeviceList();
-	if (piezo_connect_check != 0 )
-	{
-		cout << "No piezo controller detected!" << endl;
-		exit(0);
-	}
-	//get device list size
-	short n = TLI_GetDeviceListSize();
-	printf("Found Device matched: %d!\r\n", n);
-	char *context = NULL;
-	//get BBD serial numbers
-	char serialNos[100] = { '0' };
-	TLI_GetDeviceListByTypeExt(serialNos, 100, 29);
-	std::vector<std::string> serialNo_total(0);
-
-	//output list of matching devices
-	char *p = strtok_s(serialNos, ",", &context);
-	while (p != NULL)
-	{
-		TLI_DeviceInfo deviceInfo;
-		//get device info form device
-		TLI_GetDeviceInfo(p, &deviceInfo);
-		//get strings from device info structure
-		char desc[65];
-		strncpy_s(desc, deviceInfo.description, 64);
-		desc[64] = '\0';
-		char serialNo[9];
-		strncpy_s(serialNo, deviceInfo.serialNo, 8);
-		serialNo[8] = '\0';
-		std::string serialNo_temp;
-		serialNo_temp = std::string(serialNo);
-		serialNo_total.push_back(serialNo_temp);
-		// output
-		printf("Found Device %s=%s : %s\r\n", p, serialNo, desc);
-		p = strtok_s(NULL, ",", &context);
-	}
-	char testSerialNo[2][9] = { '\0' };
-	double maximumoutput = 150;
-	short setmaximumoutput = maximumoutput * 10;
-	for (short i = 0; i < n; i++)
-	{
-		strncpy_s(testSerialNo[i], serialNo_total[i].c_str(), serialNo_total[i].length());
-		PCC_Open(testSerialNo[i]);
-		PCC_CheckConnection(testSerialNo[i]);
-		PCC_Identify(testSerialNo[i]);
-		PCC_Enable(testSerialNo[i]);
-		PCC_SetZero(testSerialNo[i]);
-		PCC_SetPositionControlMode(testSerialNo[i], PZ_ControlModeTypes::PZ_OpenLoop);
-		PCC_SetVoltageSource(testSerialNo[i], PZ_InputSourceFlags::PZ_Potentiometer);
-		PCC_SetMaxOutputVoltage(testSerialNo[i], setmaximumoutput);
-	}
 	
-	// set initial voltage
-	setvoltage(testSerialNo[0], 75.0, maximumoutput);
-	setvoltage(testSerialNo[1], 75.0, maximumoutput);
 
-	Sleep(sleeptime);
+
 
 	// get init position for the spot
 	cv::Point2f initMassCenter = GetSpotCenter(camera);
@@ -140,16 +100,19 @@ int main()
 
 	int calib_start = 1;
 	int calib_step = 1;
-	int calib_stop = 150;
+	int calib_stop = 100;
 
 	// initialize the drift val table
 	vector<cv::Point2d> drift_table_0(0), drift_table_1(0);
-	drift_table_0 = calibrate_controller(testSerialNo[0], camera, initMassCenter, calib_start, calib_stop, calib_step, maximumoutput);
+	drift_table_0 = calibrate_controller(taskHandle_ao0, camera, initMassCenter, calib_start, calib_stop, calib_step, 0.1);
 	cout << "calibrate next controller: " << endl;
-	drift_table_1 = calibrate_controller(testSerialNo[1], camera, initMassCenter, calib_start, calib_stop, calib_step, maximumoutput);
-		
+	drift_table_0 = calibrate_controller(taskHandle_ao1, camera, initMassCenter, calib_start, calib_stop, calib_step, 0.1);
+
+	DAQmxStopTask(taskHandle_ao0);
+	DAQmxStopTask(taskHandle_ao1);
+
 	// save calibration data to file
-		std::vector<double> offset_x(0);
+	std::vector<double> offset_x(0);
 	std::vector<double> offset_y(0);
 	ofstream outputFile;
 	outputFile.open("outputFile_controller0.txt", std::ios::out);
@@ -178,10 +141,9 @@ int main()
 	// if the controller[0] controls y axis
 	if (x_std < y_std)
 	{
-		char testSerialNo_temp[9] = { '\0' };
-		strcpy_s(testSerialNo_temp, testSerialNo[0]);
-		strcpy_s(testSerialNo[0], testSerialNo[1]);
-		strcpy_s(testSerialNo[1], testSerialNo_temp);
+		DAQmxCreateAOVoltageChan(taskHandle_ao0, "Dev1/ao1", "", 0.0, 10.0, DAQmx_Val_Volts, "");
+		DAQmxCreateAOVoltageChan(taskHandle_ao1, "Dev1/ao0", "", 0.0, 10.0, DAQmx_Val_Volts, "");
+
 		if (y_mean < 0)
 		{
 			sign_y = -1;
@@ -228,20 +190,15 @@ int main()
 		}
 	}
 
-
-	// start ATP from a bad position
-
-	//setvoltage(testSerialNo[0], 75.0, maximumoutput);
-	//setvoltage(testSerialNo[1], 75.0, maximumoutput);
-
-	//Sleep(sleeptime);
+	DAQmxStartTask(taskHandle_ao0);
+	DAQmxStartTask(taskHandle_ao1);
 
 	// capture loop
 	char key = 0;
-	double error_tolerance = 0.5;
-	double kp_0 = 5, kp_1 = 5;    // Proportion
-	double ki_0 = 5.0, ki_1 = 5.0; // Integral    
-	double kd_0 = 0.0, kd_1 = 0.0; // Derivative
+	float64 error_tolerance = 0.5;
+	float64 kp_0 = 5, kp_1 = 5;    // Proportion
+	float64 ki_0 = 5.0, ki_1 = 5.0; // Integral    
+	float64 kd_0 = 0.0, kd_1 = 0.0; // Derivative
 	
 
 	//std::vector<cv::Point> historyMassCenter(0);
@@ -254,14 +211,14 @@ int main()
 		// x,y location of the mass center
 		//double xloc = currentMassCenter.x;
 		//double yloc = currentMassCenter.y;
-		double v0 = 75.0, v1 = 75.0;
-		double x_error_present = currentMassCenter.x - initMassCenter.x;
-		double y_error_present = currentMassCenter.y - initMassCenter.y;
-		double position_error_present = sqrt(pow(x_error_present, 2) + pow(y_error_present, 2));
-		double delta_v0 = 0, delta_v1 = 0;
+		float64 v0 = 5.0, v1 = 5.0;
+		float64 x_error_present = currentMassCenter.x - initMassCenter.x;
+		float64 y_error_present = currentMassCenter.y - initMassCenter.y;
+		float64 position_error_present = sqrt(pow(x_error_present, 2) + pow(y_error_present, 2));
+		float64 delta_v0 = 0, delta_v1 = 0;
 	
-		double x_error_last = 0, y_error_last = 0;
-		double x_error_previous = 0, y_error_previous = 0;
+		float64 x_error_last = 0, y_error_last = 0;
+		float64 x_error_previous = 0, y_error_previous = 0;
 
 
 		int run_times = 0;
@@ -281,8 +238,8 @@ int main()
 			run_times++;
 
 			// set output voltage
-			setvoltage(testSerialNo[0], v0, maximumoutput);
-			setvoltage(testSerialNo[1], v1, maximumoutput);
+			setvoltage(taskHandle_ao0, v0);
+			setvoltage(taskHandle_ao1, v1);
 			Sleep(sleeptime);
 
 			// read corrected position
@@ -350,11 +307,8 @@ int main()
 		// an error message
 	}
 
-	for (int m = 0; m < n; m++)
-	{
-		PCC_Close(testSerialNo[m]);
-	}
-
+	DAQmxStopTask(taskHandle_ao0);
+	DAQmxStopTask(taskHandle_ao1);
 
 	return 0;
 }
@@ -380,7 +334,7 @@ cv::Point2f GetSpotCenter(Camera& camera)
 
 	// threshold it
 	cv::Mat thresh;
-	cv::threshold(image, thresh, 20, 255, cv::THRESH_BINARY);
+	cv::threshold(image, thresh, 200, 255, cv::THRESH_BINARY);
 
 	// find contours in the thresholded image
 	cv::Mat dst = cv::Mat::zeros(image.rows, image.cols, CV_8UC3);
@@ -415,15 +369,21 @@ cv::Point2f GetSpotCenter(Camera& camera)
 	cv::Point2f mc;
 	mc = cv::Point2f(mu.m10 / mu.m00, mu.m01 / mu.m00);
 
+	// draw contour
+	/*cv::drawContours(image, contours, -1, (255, 255, 0), 2);
+	cv::namedWindow("contour");
+	cv::imshow("contour", image);
+	cv::waitKey();*/
+
 	return mc;
 }
 
-int setvoltage(char* piezo_serialno, double voltage, double max_voltage)
+int setvoltage(TaskHandle taskhandle, float64 voltage)
 {
 	
-	if (voltage >= 150)
+	if (voltage >= 10)
 	{
-		voltage = 150;
+		voltage = 10;
 		cout << "voltage too high" << endl;
 	}
 
@@ -432,12 +392,11 @@ int setvoltage(char* piezo_serialno, double voltage, double max_voltage)
 		voltage = 0;
 		cout << "voltage too low" << endl;
 	}
-	short setoutputvoltage = short(voltage / max_voltage * 32767.0);
-	PCC_SetOutputVoltage(piezo_serialno, setoutputvoltage);
+	DAQmxWriteAnalogScalarF64(taskhandle, 0, 0, voltage, NULL);
 	return 0;
 }
 
-vector<cv::Point2d> calibrate_controller(char* piezo_serialno, Camera& camera, cv::Point2f initMassCenter, int calib_start, int calib_stop, int calib_step, double maximumoutput)
+vector<cv::Point2d> calibrate_controller(TaskHandle taskhandle, Camera& camera, cv::Point2f initMassCenter, int calib_start, int calib_stop, int calib_step, double factor)
 {
 	vector<cv::Point2d> calib_table(0);
 	// calibration loop for pizo_serialno
@@ -445,7 +404,10 @@ vector<cv::Point2d> calibrate_controller(char* piezo_serialno, Camera& camera, c
 	{
 
 		// change voltage
-		setvoltage(piezo_serialno, double(j), maximumoutput);
+		float64 data = j * factor;
+		DAQmxWriteAnalogScalarF64(taskhandle, 0, 0, data, NULL);
+
+
 		Sleep(sleeptime);
 
 		cv::Point2f tempMassCenter = GetSpotCenter(camera);
@@ -462,14 +424,14 @@ vector<cv::Point2d> calibrate_controller(char* piezo_serialno, Camera& camera, c
 
 int SetShotParameter(Camera& camera, int brightness_val, int gain_val, int shutter_val)
 {
-	//set bright
+	//set bright to minima val
 	Property brightness;
 	brightness.type = BRIGHTNESS;
 	brightness.absControl = false;
 	brightness.valueA = brightness_val;
 	camera.SetProperty(&brightness);
 
-	// set gain to minma val
+	// set gain to minima val
 	Property gain;
 	gain.type = GAIN;
 	gain.absControl = false;
